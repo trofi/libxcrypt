@@ -73,6 +73,29 @@
 #define __THROW /* nothing */
 #endif
 
+/* Thread-local storage may not be supported by
+   all compilers and their specific releases.
+   Ensure we can use the macro defined from AX_TLS,
+   if the compiler supports TLS, unconditionally
+   within our code.  */
+#ifndef HAVE_THREAD_LOCAL_STORAGE
+#define TLS /* nothing */
+#endif
+
+#ifdef HAVE_FUNC_ATTRIBUTE_TLS_MODEL
+/* Models for use in DSO.  */
+#define TLS_LD TLS __attribute ((tls_model ("local-dynamic")))
+#define TLS_GD TLS __attribute ((tls_model ("global-dynamic")))
+/* Models for executables, like tests.  */
+#define TLS_LE TLS __attribute ((tls_model ("local-exec")))
+#define TLS_IE TLS __attribute ((tls_model ("initial-exec")))
+#else
+#define TLS_LD TLS
+#define TLS_GD TLS
+#define TLS_LE TLS
+#define TLS_IE TLS
+#endif
+
 /* Suppression of unused-argument warnings.  */
 #if defined __GNUC__ && __GNUC__ >= 3
 # define ARG_UNUSED(x) x __attribute__ ((__unused__))
