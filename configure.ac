@@ -55,6 +55,46 @@ AC_SYS_LARGEFILE
 zw_SIMPLE_ENABLE_WARNINGS
 LT_INIT
 
+
+# On ppc64 architectures we need to turn off the __tls_get_addr
+# runtime optimization for -fno-plt code in dynamic shared objects
+# by passing a certain flag (-Wl,--no-tls-get-addr-optimize) to
+# the linker, when compiling with gcc and using ld.bfd < 2.44.
+# See: https://sourceware.org/PR32387
+AC_CACHE_CHECK([if the host cpu is any ppc64 architecture],
+  [ac_cv_host_cpu_is_ppc64],
+    [case "$host_cpu" in
+       powerpc64*) ac_cv_host_cpu_is_ppc64=yes;;
+       *) ac_cv_host_cpu_is_ppc64=no;;
+     esac])
+
+# Get compiler vendor (gcc = gnu).
+AX_COMPILER_VENDOR
+
+# Check if compiler is gcc and ld.bfd is used.
+AC_CACHE_CHECK([if gcc uses GNU bfd as linker],
+  [ac_cv_ld_is_gnu_bfd],
+    [AS_IF([test "x$ax_cv_c_compiler_vendor" = xgnu],
+      [AS_IF([`$CC $CFLAGS -Wl,--version 2>/dev/null | \
+               $GREP -q "GNU ld version"`],
+         [ac_cv_ld_is_gnu_bfd=yes],
+         [ac_cv_ld_is_gnu_bfd=no])],
+      [ac_cv_ld_is_gnu_bfd="skipped, compiler not gcc"])])
+
+# Determine and compare ld.bfd version.
+ac_cv_ld_version=`$CC $CFLAGS -Wl,--version 2>/dev/null | \
+                  $SED -e "s/GNU gold /GNU ld /; \
+                           s/GNU ld version /GNU ld /; \
+                           s/GNU ld ([^)]*) /GNU ld /; \
+                           s/GNU ld \([0-9.][0-9.]*\).*/\1/; q"`
+AC_CACHE_CHECK([if the GNU bfd linker is version 2.44 or later],
+  [ac_cv_gnu_bfd_ge_2_44],
+    [AS_IF([test "x$ac_cv_ld_is_gnu_bfd" = xyes],
+       [AX_COMPARE_VERSION([$ac_cv_ld_version], [ge], [2.44],
+         [ac_cv_gnu_bfd_ge_2_44=yes],
+         [ac_cv_gnu_bfd_ge_2_44=no])],
+       [ac_cv_gnu_bfd_ge_2_44="skipped, compiler not gcc or linker not GNU bfd"])])
+
 # The test scripts need to know whether C global symbols have a
 # leading underscore.
 LT_SYS_SYMBOL_USCORE
@@ -176,6 +216,13 @@ AX_CHECK_VSCRIPT
 AX_GCC_FUNC_ATTRIBUTE(symver)
 AX_GCC_FUNC_ATTRIBUTE(tls_model)
 
+# FIXME: This only checks whether the compiler accepts -fno-plt.
+# It doesn't check that the switch actually does what we want it to do.
+AX_APPEND_COMPILE_FLAGS([-fno-plt], [OPTI_FLAGS])
+
+# Export compiler flags for optimization.
+AC_SUBST([OPTI_FLAGS])
+
 # FIXME: This only checks whether the linker accepts either
 # -Wl,-z,defs or -Wl,--no-undefined.  It doesn't check that the switch
 # actually does what we want it to do.
@@ -250,12 +297,39 @@ if test "x$ac_cv_ld_now" != xunknown; then
 fi
 AC_SUBST([BINDNOW_FLAG])
 
-# FIXME: This only checks whether the compiler accepts -fno-plt.
-# It doesn't check that the switch actually does what we want it to do.
-AX_APPEND_COMPILE_FLAGS([-fno-plt], [OPTI_FLAGS])
+# FIXME: This only checks whether the linker accepts
+# -Wl,--no-tls-get-addr-optimize.  It doesn't check that the switch
+# actually does what we want it to do.
+AC_CACHE_CHECK([how to explicitly disable __tls_get_addr runtime optimization],
+  [ac_cv_no_tls_get_addr_optimize], [
+  ac_cv_no_tls_get_addr_optimize=unknown
+  SAVED_LDFLAGS="$LDFLAGS"
+  LDFLAGS="$SAVED_LDFLAGS -Wl,--no-tls-get-addr-optimize"
+  AC_LINK_IFELSE([AC_LANG_PROGRAM([], [int i = 1;])],
+    [ac_cv_no_tls_get_addr_optimize=-Wl,--no-tls-get-addr-optimize])
+  LDFLAGS="$SAVED_LDFLAGS"])
 
-# Export compiler flags for optimization.
-AC_SUBST([OPTI_FLAGS])
+NO_TLS_GET_ADDR_OPT_FLAG=
+if test "x$ac_cv_no_tls_get_addr_optimize" != xunknown; then
+  NO_TLS_GET_ADDR_OPT_FLAG="$ac_cv_no_tls_get_addr_optimize"
+fi
+
+# We need -Wl,--no-tls-get-addr-optimize on the ppc64 architectures,
+# when linking code, that has been compiled with gcc and the -fno-plt
+# flag set, into a dynamic shared object through ld.bfd < 2.44.
+# See: https://sourceware.org/PR32387
+AC_CACHE_CHECK([if __tls_get_addr runtime optimization must be disabled explicitly],
+  [ac_cv_ld_no_tls_get_addr_optimize],
+  [AS_IF([test "x$ac_cv_host_cpu_is_ppc64" = xyes &&
+          test "x$ax_cv_c_compiler_vendor" = xgnu &&
+          test "x$ac_cv_ld_is_gnu_bfd" = xyes &&
+          test "x$ac_cv_gnu_bfd_ge_2_44" = xno &&
+          test "x$ax_cv_check_cflags___fno_plt" = xyes &&
+          test "x$ac_cv_no_tls_get_addr_optimize" != xunknown],
+    [ac_cv_ld_no_tls_get_addr_optimize=yes],
+    [ac_cv_ld_no_tls_get_addr_optimize=no])])
+AS_IF([test "x$ac_cv_ld_no_tls_get_addr_optimize" = xyes],
+  [AC_SUBST([NO_TLS_GET_ADDR_OPT_FLAG])])
 
 # Checks for library functions.
 AC_CHECK_FUNCS_ONCE([
